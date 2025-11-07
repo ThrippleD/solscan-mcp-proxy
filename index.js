@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
 import fetch from 'node-fetch';
+import Bottleneck from 'bottleneck';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { z } from 'zod';
@@ -9,9 +10,11 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
+
+// --- QuickNode / Solana RPC (فقط QuickNode) ---
 const QUICKNODE_HTTP_URL = process.env.QUICKNODE_HTTP_URL;
-const RPC_COMMITMENT = process.env.RPC_COMMITMENT || 'processed';
-const RPC_TIMEOUT_MS = Number(process.env.RPC_TIMEOUT_MS || 20000);
+const RPC_COMMITMENT  = process.env.RPC_COMMITMENT  || 'processed';
+const RPC_TIMEOUT_MS  = Number(process.env.RPC_TIMEOUT_MS  || 20000);
 const RPC_MAX_RETRIES = Number(process.env.RPC_MAX_RETRIES || 3);
 
 if (!QUICKNODE_HTTP_URL) {
@@ -19,38 +22,65 @@ if (!QUICKNODE_HTTP_URL) {
   process.exit(1);
 }
 
-app.get('/health', (_req, res) => res.json({ ok: true, provider: 'quicknode' }));
+// --- Rate limit: هاردکد (زیر 15 req/s بماند) ---
+const RATE_RPS = 12;
+const RATE_CONCURRENCY = 1;
 
-// ---------- QuickNode RPC helper (timeout + retry) ----------
-async function qnRpc(method, params = []) {
+// لیمتر: حداکثر RATE_RPS درخواست در هر ثانیه، اجرای ترتیبی
+const limiter = new Bottleneck({
+  reservoir: RATE_RPS,
+  reservoirRefreshAmount: RATE_RPS,
+  reservoirRefreshInterval: 1000, // ms
+  maxConcurrent: RATE_CONCURRENCY,
+});
+
+// Health
+app.get('/health', (_req, res) => {
+  res.json({
+    ok: true,
+    provider: 'quicknode',
+    rps: RATE_RPS,
+    timeout_ms: RPC_TIMEOUT_MS,
+    retries: RPC_MAX_RETRIES,
+  });
+});
+
+// ---- Helper: RPC خام با timeout/retry/backoff ----
+async function qnRpcRaw(method, params = []) {
   let lastErr;
   for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+
     try {
       const body = JSON.stringify({
         jsonrpc: '2.0',
         id: Date.now(),
         method,
-        params: params.length ? params : [{ commitment: RPC_COMMITMENT }],
+        params: (Array.isArray(params) && params.length > 0)
+          ? params
+          : [{ commitment: RPC_COMMITMENT }],
       });
+
       const r = await fetch(QUICKNODE_HTTP_URL, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body,
         signal: controller.signal,
       });
+
       const json = await r.json().catch(async () => ({ text: await r.text() }));
       clearTimeout(timer);
+
       if (!r.ok || (json && json.error)) {
         const msg = json && json.error ? JSON.stringify(json.error) : await r.text();
         throw new Error(`RPC ${r.status}: ${String(msg).slice(0, 400)}`);
       }
-      return json;
+      return json; // پاسخ کامل JSON-RPC
     } catch (e) {
       lastErr = e;
       if (attempt === RPC_MAX_RETRIES) break;
-      await new Promise((rs) => setTimeout(rs, 350 * (attempt + 1)));
+      await new Promise((rs) => setTimeout(rs, 350 * (attempt + 1))); // backoff سبک
     } finally {
       clearTimeout(timer);
     }
@@ -58,7 +88,10 @@ async function qnRpc(method, params = []) {
   throw lastErr;
 }
 
-// ---------- MCP Server ----------
+// نسخه لیمیت‌شده
+const qnRpc = limiter.wrap(qnRpcRaw);
+
+// ---- MCP Server ----
 const server = new McpServer(
   { name: 'quicknode-mcp-proxy', version: '1.0.0' },
   { capabilities: { logging: {} } }
