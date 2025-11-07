@@ -9,51 +9,93 @@ const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 3000;
-const BASE_URL = process.env.BASE_URL || 'https://pro-api.solscan.io';
-const API_KEY = process.env.SOLSCAN_API_KEY;
+const QUICKNODE_HTTP_URL = process.env.QUICKNODE_HTTP_URL;
+const RPC_COMMITMENT = process.env.RPC_COMMITMENT || 'processed';
+const RPC_TIMEOUT_MS = Number(process.env.RPC_TIMEOUT_MS || 12000);
+const RPC_MAX_RETRIES = Number(process.env.RPC_MAX_RETRIES || 2);
 
-// Health check
-app.get('/health', (_req, res) => res.json({ ok: true }));
-
-// ----- Solscan fetch helper
-async function solscanGet(path, query = {}) {
-  const url = new URL(`${BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`);
-  Object.entries(query || {}).forEach(([k, v]) => url.searchParams.set(k, v));
-  const r = await fetch(url, { headers: { token: API_KEY } });
-  const text = await r.text();
-  let data; try { data = JSON.parse(text); } catch { data = text; }
-  if (!r.ok) throw new Error(`Solscan error ${r.status}: ${String(text).slice(0, 400)}`);
-  return data;
+if (!QUICKNODE_HTTP_URL) {
+  console.error('Missing QUICKNODE_HTTP_URL');
+  process.exit(1);
 }
 
-// ----- MCP server (درستش اینه!)
+app.get('/health', (_req, res) => res.json({ ok: true, provider: 'quicknode' }));
+
+// ---------- QuickNode RPC helper (timeout + retry) ----------
+async function qnRpc(method, params = []) {
+  let lastErr;
+  for (let attempt = 0; attempt <= RPC_MAX_RETRIES; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), RPC_TIMEOUT_MS);
+    try {
+      const body = JSON.stringify({
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method,
+        params: params.length ? params : [{ commitment: RPC_COMMITMENT }],
+      });
+      const r = await fetch(QUICKNODE_HTTP_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+        signal: controller.signal,
+      });
+      const json = await r.json().catch(async () => ({ text: await r.text() }));
+      clearTimeout(timer);
+      if (!r.ok || (json && json.error)) {
+        const msg = json && json.error ? JSON.stringify(json.error) : await r.text();
+        throw new Error(`RPC ${r.status}: ${String(msg).slice(0, 400)}`);
+      }
+      return json;
+    } catch (e) {
+      lastErr = e;
+      if (attempt === RPC_MAX_RETRIES) break;
+      await new Promise((rs) => setTimeout(rs, 350 * (attempt + 1)));
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw lastErr;
+}
+
+// ---------- MCP Server ----------
 const server = new McpServer(
-  { name: 'solscan-mcp-proxy', version: '1.0.0' },
+  { name: 'quicknode-mcp-proxy', version: '1.0.0' },
   { capabilities: { logging: {} } }
 );
 
-// ابزار اصلی: GET به Solscan
+// ابزار MCP: Solana RPC از طریق QuickNode
 server.tool(
-  'solscan.get',
+  'solana.rpc',
   {
-    path: z.string(),
-    query: z.record(z.any()).optional(),
+    method: z.string(),
+    params: z.array(z.any()).optional(),
   },
-  async ({ path, query }) => {
-    const data = await solscanGet(path, query || {});
-    return { content: [{ type: 'json', json: data }] };
+  async ({ method, params }) => {
+    const out = await qnRpc(method, params || []);
+    return { content: [{ type: 'json', json: out }] };
   }
 );
 
-// ----- SSE endpoint for MCP
+// SSE endpoint برای MCP
 app.get('/sse', async (_req, res) => {
   const transport = new SSEServerTransport('/messages', res);
   await server.connect(transport);
 });
 
-// messages stub (SSE transport پیام‌ها را هندل می‌کند)
-app.post('/messages', (_req, res) => {
-  res.status(200).json({ status: 'received' });
+// stub پیام‌ها
+app.post('/messages', (_req, res) => res.status(200).json({ status: 'received' }));
+
+// REST تست سریع (اختیاری)
+app.post('/rpc', async (req, res) => {
+  try {
+    const { method, params = [] } = req.body || {};
+    if (!method) return res.status(400).json({ error: 'method is required' });
+    const out = await qnRpc(method, params);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
 });
 
 app.listen(PORT, () => console.log(`HTTP up on :${PORT}`));
