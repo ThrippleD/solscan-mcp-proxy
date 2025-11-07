@@ -11,8 +11,8 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const QUICKNODE_HTTP_URL = process.env.QUICKNODE_HTTP_URL;
 const RPC_COMMITMENT = process.env.RPC_COMMITMENT || 'processed';
-const RPC_TIMEOUT_MS = Number(process.env.RPC_TIMEOUT_MS || 12000);
-const RPC_MAX_RETRIES = Number(process.env.RPC_MAX_RETRIES || 2);
+const RPC_TIMEOUT_MS = Number(process.env.RPC_TIMEOUT_MS || 20000);
+const RPC_MAX_RETRIES = Number(process.env.RPC_MAX_RETRIES || 3);
 
 if (!QUICKNODE_HTTP_URL) {
   console.error('Missing QUICKNODE_HTTP_URL');
