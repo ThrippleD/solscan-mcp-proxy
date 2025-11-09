@@ -441,8 +441,18 @@ addTool("advanced.ml_suggest_wallets", z.object({}).optional().default({}), () =
 addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}), () => discoverNewProfitWallets(), "Auto discovery of profitable wallets (future)");
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
-// SSE endpoint for MCP
-const appServer = app.listen(PORT, ()=>console.log(`HTTP up on :${PORT}`));
-app.get("/sse", async (_req, res) => { const transport = new SSEServerTransport("/messages", res); await server.connect(transport); });
+// ==== MCP SSE wiring (final) ====
+// فرض: در بالای فایل همین app و server ساخته شده‌اند:
+//   const app = express();
+//   const server = new McpServer({ name: "NALH-Helius-MCP", version: "1.0.0" }, { capabilities: { logging: {} } });
 
+const transport = new SSEServerTransport("/sse", app); // GET /sse را ثبت می‌کند و POST /messages را هم خودش هندل می‌کند
+await server.connect(transport);
+
+app.listen(PORT, () => {
+  console.log(`HTTP up on :${PORT}  |  SSE: /sse  |  POST: /messages (auto)`);
+});
+
+// (اختیاری) اگر health داری همان قبلی بماند؛ دوباره تعریفش نکن.
 export {};
+
