@@ -442,20 +442,8 @@ addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}),
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
 // ===== HTTP + MCP (SSE) bootstrap — put this at the very end of index.js
-const app = express();
+// Reuse the existing `app` and `server` defined above (do NOT re-declare them).
 
-app.get("/health", (_req, res) => {
-  res.json({
-    ok: true,
-    rpc: !!HELIUS_RPC_URL,
-    api: !!HELIUS_API_KEY,
-    parse_tx_url: !!HELIUS_PARSE_TX_URL,
-    parse_addr_url: !!HELIUS_PARSE_ADDR_URL,
-  });
-});
-
-// Mount SSE transport on /sse (it also wires the POST ingress internally).
-// IMPORTANT: do NOT 'await' connect here — let it run in background.
 const transport = new SSEServerTransport("/sse", app);
 server.connect(transport).catch((err) => {
   console.error("MCP connect error:", err);
@@ -464,5 +452,3 @@ server.connect(transport).catch((err) => {
 app.listen(PORT, () => {
   console.log(`HTTP up on :${PORT}`);
 });
-
-
