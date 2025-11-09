@@ -441,36 +441,14 @@ addTool("advanced.ml_suggest_wallets", z.object({}).optional().default({}), () =
 addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}), () => discoverNewProfitWallets(), "Auto discovery of profitable wallets (future)");
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
-// ===== HTTP + MCP (SSE) bootstrap — EXPRESS route + writeHead shim
-// از قبل app و server بالاتر ساخته شده‌اند. /health و POST /messages هم همین‌طور.
+// --- SSE wiring with SDK 0.2.x (auto-registers routes)
+app.get("/health", (_req, res) =>
+  res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY })
+);
 
-app.get("/sse", async (req, res) => {
-  // بعضی نسخه‌های Express متد writeHead را اکسپوز نمی‌کنند؛
-  // MCP SDK به آن تکیه می‌کند، پس شیم زیر را اضافه می‌کنیم.
-  if (typeof res.writeHead !== "function") {
-    res.writeHead = function (status, headers) {
-      res.status(status);
-      if (headers) {
-        for (const [k, v] of Object.entries(headers)) {
-          res.setHeader(k, v);
-        }
-      }
-      return res;
-    };
-  }
+// این خط‌ها مسیرهای GET /sse و POST /messages را خودکار روی همان app ثبت می‌کند
+const transport = new SSEServerTransport("/sse", app);
+await server.connect(transport);
 
-  try {
-    // در حالت route-based باید مسیر ارسال پیام‌ها را بدهیم:
-    const transport = new SSEServerTransport("/messages", res);
-    await server.connect(transport);
-  } catch (err) {
-    console.error("MCP connect error:", err);
-    try { res.end(); } catch {}
-  }
-});
-
-// سرور HTTP
-app.listen(PORT, () => {
-  console.log(`HTTP up on :${PORT}`);
-});
-
+// راه‌اندازی HTTP
+app.listen(PORT, () => console.log(`HTTP up on :${PORT}`));
