@@ -441,54 +441,15 @@ addTool("advanced.ml_suggest_wallets", z.object({}).optional().default({}), () =
 addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}), () => discoverNewProfitWallets(), "Auto discovery of profitable wallets (future)");
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
-// ===== HTTP + MCP (SSE) bootstrap — REPLACE FROM HERE TO EOF =====
-
-// GET /sse  — کانال رویدادها
-app.get("/sse", async (req, res) => {
-  // شِیم‌هایی که SDK انتظار دارد
-  res.writeHead = (status, headers = {}) => {
-    res.status(status);
-    for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-    return res;
-  };
-  if (typeof res.flushHeaders !== "function") {
-    res.flushHeaders = () => { try { res.write("\n"); } catch (_) {} };
-  }
-
-  try {
-    const transport = new SSEServerTransport("/messages", res);
-    await server.connect(transport);
-  } catch (err) {
-    console.error("MCP connect error:", err);
-    try { res.end(); } catch (_) {}
-  }
-});
-
-// POST /messages — این یکی حتما باید باشد
-app.post("/messages", express.raw({ type: "*/*" }), async (req, res) => {
-  // همان شِیم برای اطمینان
-  res.writeHead = (status, headers = {}) => {
-    res.status(status);
-    for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-    return res;
-  };
-  if (typeof res.flushHeaders !== "function") {
-    res.flushHeaders = () => { try { res.write("\n"); } catch (_) {} };
-  }
-
-  try {
-    const transport = new SSEServerTransport("/messages", res);
-    await server.connect(transport);
-  } catch (err) {
-    console.error("MCP /messages error:", err);
-    try { res.end(); } catch (_) {}
-  }
-});
+// --- SSE endpoints for MCP (SDK 0.2.x; Express-integrated)
+// هیچ روت دستی برای /sse یا /messages تعریف نکن
+const transport = new SSEServerTransport("/sse", app);
+await server.connect(transport);
 
 // Health ساده
-app.get("/health", (_req, res) =>
-  res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY })
-);
+app.get("/health", (_req, res) => {
+  res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY });
+});
 
-// Start HTTP
+// شروع HTTP
 app.listen(PORT, () => console.log(`HTTP up on :${PORT}`));
