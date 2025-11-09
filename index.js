@@ -442,13 +442,14 @@ addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}),
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
 // ===== HTTP + MCP (SSE) bootstrap — put this at the very end of index.js
-// Reuse the existing `app` and `server` defined above (do NOT re-declare them).
+// uses the existing `app` and `server` defined above
 
-const transport = new SSEServerTransport("/sse", app);
-server.connect(transport).catch((err) => {
+(async () => {
+  const transport = new SSEServerTransport("/sse", app); // registers GET /sse and POST /messages
+  await server.connect(transport);
+  app.listen(PORT, () => {
+    console.log(`HTTP up on :${PORT}`);
+  });
+})().catch(err => {
   console.error("MCP connect error:", err);
-});
-
-app.listen(PORT, () => {
-  console.log(`HTTP up on :${PORT}`);
 });
