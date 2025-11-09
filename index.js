@@ -442,7 +442,7 @@ addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}),
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
 // --- MCP (SSE) bootstrap — SDK 0.2.x
-// مهم: هیچ body-parser روی /messages ست نکن؛ خود ترنسپورت روت‌ها را رجیستر می‌کند
+// مهم: هیچ body-parser روی /sse یا /messages ست نکن؛ خود ترنسپورت روت‌ها را رجیستر می‌کند
 const transport = new SSEServerTransport("/sse", app);
 await server.connect(transport);
 
@@ -451,6 +451,17 @@ app.get("/health", (_req, res) =>
   res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY })
 );
 
-// Start HTTP
-app.listen(PORT, () => console.log(`HTTP up on :${PORT}`));
+// Fly.io-friendly HTTP startup: bind on 0.0.0.0 and respect PORT
+const HOST = process.env.HOST || "0.0.0.0";
+const httpServer = app.listen(PORT, HOST, () =>
+  console.log(`HTTP up on ${HOST}:${PORT}`)
+);
 
+// Graceful shutdown for Fly (rolling deploy/scale)
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    console.log(`Received ${sig}, closing...`);
+    httpServer.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 10_000).unref();
+  });
+}
