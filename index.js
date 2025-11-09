@@ -441,15 +441,16 @@ addTool("advanced.ml_suggest_wallets", z.object({}).optional().default({}), () =
 addTool("advanced.discover_profit_wallets", z.object({}).optional().default({}), () => discoverNewProfitWallets(), "Auto discovery of profitable wallets (future)");
 addTool("advanced.tokenomics_analyze", z.object({ options: z.record(z.any()).optional() }), ({ options }) => analyzeTokenomics(options||{}), "Advanced tokenomics (deflation/mintable/tax change)");
 
-// --- SSE endpoints for MCP (SDK 0.2.x; Express-integrated)
-// هیچ روت دستی برای /sse یا /messages تعریف نکن
+// --- MCP (SSE) bootstrap — SDK 0.2.x
+// مهم: هیچ body-parser روی /messages ست نکن؛ خود ترنسپورت روت‌ها را رجیستر می‌کند
 const transport = new SSEServerTransport("/sse", app);
 await server.connect(transport);
 
-// Health ساده
-app.get("/health", (_req, res) => {
-  res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY });
-});
+// Health
+app.get("/health", (_req, res) =>
+  res.json({ ok: true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY })
+);
 
-// شروع HTTP
+// Start HTTP
 app.listen(PORT, () => console.log(`HTTP up on :${PORT}`));
+
