@@ -385,7 +385,6 @@ function blacklistCheck(address, blacklist=[]) { const set = new Set(blacklist);
 
 // ====== HTTP (health)
 const app = express();
-app.get("/health", (_req,res)=>res.json({ ok:true, rpc: !!HELIUS_RPC_URL, api: !!HELIUS_API_KEY }));
 app.post("/messages", (_req,res)=>res.status(200).json({ status: "received" }));
 
 // ====== MCP server + tools
